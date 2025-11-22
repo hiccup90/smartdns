@@ -9,6 +9,7 @@ ARG REPO="pymumu/smartdns"
 
 RUN API_URL="https://api.github.com/repos/${REPO}/releases/latest" && \
     ASSET_URL=$(curl -sL $API_URL | jq -r '.assets[] | select(.name | test("x86_64-linux-all\\.tar\\.gz$")) | .browser_download_url') && \
+    echo "Downloading: $ASSET_URL" && \
     curl -L -o /tmp/smartdns.tar.gz "$ASSET_URL"
 
 RUN mkdir -p /tmp/smartdns && \
@@ -16,26 +17,28 @@ RUN mkdir -p /tmp/smartdns && \
 
 
 ##############################################
-# Stage 2: Final Runtime (ultra slim)
+# Stage 2: Final Runtime (Slim Alpine)
 ##############################################
 FROM alpine:3.20
 
-# 安装必要组件（只保留 busybox-wget 代替 curl）
+# 安装最小依赖
 RUN apk add --no-cache tzdata busybox-suid && \
     cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo "Asia/Shanghai" > /etc/timezone && \
-    # 删除全部时区，保留 China
     rm -rf /usr/share/zoneinfo && \
     mkdir -p /usr/share/zoneinfo/Asia && \
     cp /etc/localtime /usr/share/zoneinfo/Asia/Shanghai && \
     mkdir -p /etc/smartdns /var/lib/smartdns /var/log/smartdns
 
-# 复制 SmartDNS
+# 拷贝 SmartDNS 文件
 COPY --from=downloader /tmp/smartdns/etc/ /etc/
 COPY --from=downloader /tmp/smartdns/usr/ /usr/
 
+# 暴露端口
 EXPOSE 53/udp 6080/tcp
 
+# 可挂载目录
 VOLUME ["/etc/smartdns", "/var/lib/smartdns"]
 
-CMD ["/usr/sbin/smartdns", "-f", "-x"]
+# 🟩 容器启动自动运行 crond + SmartDNS（关键改动）
+CMD sh -c "crond && exec /usr/sbin/smartdns -f -x"
